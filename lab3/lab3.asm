@@ -54,30 +54,36 @@ call clear_buffer
 
 ; TASK 2.1: KEYBOARD ==> FLOPPY
 ; write the text from keyboard to ram/buffer;
-mov di, buffer
-call write
+;mov di, buffer
+;call write
 
 ; identify the command: ex. w num num num num "text"
+;command db "w 0 66 14 4 :text", 0
+mov si, command
+mov di, buffer
+loop_write:
+    mov al, byte [si]
+    mov byte [di], al
+    inc si
+    inc di
+    cmp byte [si], 0
+    jne loop_write
+
 mov si, buffer
 call parse_command
 
-mov si, buffer
-call print
-
-;mov si, valid
-;call print
-
 ; get the data that you wrote above in the next 512 bytes of RAM
-;mov al, 1
-;mov ch, 66
-;mov cl, 13
-;mov dh, 0
-;xor bx, bx
-;mov es, bx
-;mov bx, buffer + 200h
-;call read_from_floppy
-;mov si, bx
-;call print
+mov al, 1
+mov dh, 0
+mov ch, 66
+mov cl, 14
+xor bx, bx
+mov es, bx
+mov bx, buffer + 200h
+call read_from_floppy
+
+mov si, bx
+call print
 
 
 ; write the text to RAM N times
@@ -114,11 +120,16 @@ convert_to_numerical:
     ret
 
 unknown_command:
-    mov byte [valid], 0
+    mov byte [valid], "F"
+    ret
+
+print_char:
+    mov ah, 0x0E
+    int 10h
     ret
 
 parse_command:
-    mov byte [valid], 1
+    mov byte [valid], "T"
 
     ;cmp byte [si], 'w'
     ;jne elif_r
@@ -127,23 +138,23 @@ parse_command:
         jne unknown_command
 
         ; takes the head and converts it to numerical
-        add si, 2
+        add si, 2h
         call convert_to_numerical
-        cmp byte [valid], 0
+        cmp byte [valid], "F"
         je break
         mov byte [head], al
 
         ; takes the track and converts it
         inc si
         call convert_to_numerical
-        cmp byte [valid], 0
+        cmp byte [valid], "F"
         je break
         mov byte [track], al
 
         ; takes the sector and converts it to number
         inc si
         call convert_to_numerical
-        cmp byte [valid], 0
+        cmp byte [valid], "F"
         je break
         mov byte [sector], al
 
@@ -154,7 +165,7 @@ parse_command:
         je break
         mov byte [N], al
 
-        ; take the text and repeat it in the ram
+        ; take the text and repeat it in the ram: correct
         inc si
         cmp byte [si], ':' 
         jne unknown_command
@@ -176,8 +187,12 @@ parse_command:
         mul dx
         
         mov dx, 0
-        mov bx, 512
+        mov bx, 8
         div bx ; al - quotient, ah - remainder
+
+        mov al, ah
+        call print_char
+
         cmp ah, 0
         je write_step
         inc al
@@ -347,10 +362,11 @@ break:
 frunze_signature db "@@@FAF-212 Vladislav FRUNZE###", 0
 chiper_signature db "@@@FAF-212 Andreea CHIPER###", 0
 manole_signature db "@@@FAF-212 Andreea MANOLE###", 0
-buffer dw 7e00h + 200h + 200h
-valid db 1, 0
-head db 0
-track db 0
-sector db 0
-N db 0
+valid db "T", 0
+head db 0, 0
+track db 0, 0
+sector db 0, 0
+N db 0, 0
 prompt db '>', 0
+command db "w 1 66 14 3 :text", 0
+buffer dw 7e00h + 200h + 200h
