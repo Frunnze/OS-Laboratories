@@ -26,7 +26,7 @@ dw 0xAA55
 ; TASK 1: write our signatures to the floppy disk.
 ; repeat frunze's signature 10 times
 mov ax, frunze_signature
-mov di, buffer
+mov di, buffer ; page 4
 mov dx, 30
 mov bx, 10
 call repeat_string
@@ -54,49 +54,201 @@ call clear_buffer
 
 ; TASK 2.1: KEYBOARD ==> FLOPPY
 ; write the text from keyboard to ram/buffer;
-;mov di, buffer
-;call write
+main_loop:
+    ; clear the prompt page (4th page)
+    mov di, buffer
+    mov cx, 512
+    call clear_buffer
 
-; identify the command: ex. w num num num num "text"
-;command db "w 0 66 14 4 :text", 0
-mov si, command
-mov di, buffer
-loop_write:
-    mov al, byte [si]
-    mov byte [di], al
-    inc si
-    inc di
-    cmp byte [si], 0
-    jne loop_write
+    ; print the command prompt '>'
+    mov si, prompt
+    call print
 
-mov si, buffer
-call parse_command
+    ; write the command to the 4th page
+    mov di, buffer
+    call write
 
-; get the data that you wrote above in the next 512 bytes of RAM
-mov al, 1
-mov dh, 0
-mov ch, 66
-mov cl, 14
-xor bx, bx
-mov es, bx
-mov bx, buffer + 200h
-call read_from_floppy
+    ; execute the command
+    mov si, buffer
+    call execute_command
 
-mov si, bx
-call print
+    ; print if the command is valid
+    cmp byte [valid], "F"
+    jne main_loop
+    mov si, error
+    call print
+    call new_line
 
-
-; write the text to RAM N times
-; find how many sectors are necessary in the floppy
-; write the data from RAM to floppy
+    jmp main_loop      
 
 jmp $
 
 
 ; --- Functions section ---
+execute_command:
+    mov byte [valid], "T"
+    mov byte [head], 0
+    mov byte [track], 0
+    mov byte [sector], 0
+
+    cmp byte [si], 'w'
+    jne elif_r
+    if_w:
+        cmp byte [si + 1], 0
+        jne unknown_command
+
+        ; print head
+        mov si, headLabel
+        call print
+        ; obtains the head and converts it to numerical
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        mov byte [head], al
+
+        ; print track
+        mov si, trackLabel
+        call print
+        ; takes the track and converts it to numerical
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        mov byte [track], al
+
+        ; print sector
+        mov si, sectorLabel
+        call print
+        ; takes the sector and converts it to number
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        mov byte [sector], al
+
+        ; print N
+        mov si, NLabel
+        call print
+        ; takes N and converts it to number
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        cmp al, 0
+        je unknown_command
+        mov byte [N], al
+
+        ; print text label
+        mov si, textLabel
+        call print
+        ; take the text and repeat it in the ram
+        mov si, di ; text start
+        call write
+        xor ax, ax
+        mov ax, si
+        xor dx, dx
+        call get_string_length ; dx
+        xor bx, bx
+        mov bx, [N]
+        mov di, buffer + 200h ; page 5
+        call repeat_string
+
+        ; empty line and the sequence
+        mov si, ax
+        call new_line
+        call print
+        call new_line
+
+        ; find the number of sectors needed
+        ; sectors = N * string_length // 512
+        xor ax, ax
+        mov ax, [N]
+        mul dx 
+        mov [rs_length], ax       
+
+        xor dx, dx
+        mov bx, 512 ; divider
+        div bx ; ax - quotient, dx - remainder
+        cmp dx, 0 ; if remainder is 0
+        je write_step ; go and write to the floppy
+        inc al ; otherwise add an additional sector
+
+        ; take the repeated text and store it to floppy
+        write_step:
+            mov dh, [head]
+            mov ch, [track]
+            mov cl, [sector]
+            xor bx, bx
+            mov es, bx
+            mov bx, buffer + 200h ; page 5 (where the repeated text is)
+            call write_to_floppy
+
+        ; error code
+        mov cl, ah
+        mov si, errorCodeLabel
+        call print
+
+        mov ah, cl
+        call convert_2hex_to_str
+        mov si, errorCode
+        call print
+        call new_line
+
+        ; clear the pages with the repeated string
+        cmp word [rs_length], 0
+        je break
+        mov di, buffer + 200h
+        mov cx, [rs_length]
+        call clear_buffer
+
+        ret
+
+    elif_r:
+        cmp byte [si], 'r'
+        jne elif_m
+        cmp byte [si + 1], 0
+        jne unknown_command
+        ret
+
+    elif_m:
+        cmp byte [si], 'm'
+        jne unknown_command
+        cmp byte [si + 1], 0
+        jne unknown_command
+        ret
+
+convert_2hex_to_str:
+    ; parameters: ah - hex number of 2 digits; 
+    ; returns: errorCode
+
+    xor bl, bl
+    ; add first hex digit to buffer
+    mov bl, ah
+    and bl, 0xF0 ; 11110000
+    shr bl, 4
+    add bl, '0'
+    mov byte [errorCode], bl
+
+    ; add second hex digit to buffer
+    mov bl, ah
+    and bl, 0x0F
+    add bl, '0'
+    mov byte [errorCode + 1], bl
+
+    ret
+
 convert_to_numerical:
     ; parameters
-    ; si - address of the string; 
+    ; si - address of the string; dl - delimiter
     ; returns ax - number and si - index
 
     xor ax, ax
@@ -115,99 +267,13 @@ convert_to_numerical:
         add ax, bx
 
         inc si
-        cmp byte [si], ' '
+        cmp byte [si], dl
         jne convert_loop
     ret
 
 unknown_command:
     mov byte [valid], "F"
     ret
-
-print_char:
-    mov ah, 0x0E
-    int 10h
-    ret
-
-parse_command:
-    mov byte [valid], "T"
-
-    ;cmp byte [si], 'w'
-    ;jne elif_r
-    if_w:
-        cmp byte [si + 1], ' '
-        jne unknown_command
-
-        ; takes the head and converts it to numerical
-        add si, 2h
-        call convert_to_numerical
-        cmp byte [valid], "F"
-        je break
-        mov byte [head], al
-
-        ; takes the track and converts it
-        inc si
-        call convert_to_numerical
-        cmp byte [valid], "F"
-        je break
-        mov byte [track], al
-
-        ; takes the sector and converts it to number
-        inc si
-        call convert_to_numerical
-        cmp byte [valid], "F"
-        je break
-        mov byte [sector], al
-
-        ; takes N and converts it to number
-        inc si
-        call convert_to_numerical
-        cmp byte [valid], 0
-        je break
-        mov byte [N], al
-
-        ; take the text and repeat it in the ram: correct
-        inc si
-        cmp byte [si], ':' 
-        jne unknown_command
-
-        inc si
-        xor ax, ax
-        mov ax, si
-        xor dx, dx
-        call get_string_length ; dx
-        xor bx, bx
-        mov bx, [N]
-        mov di, buffer + 200h
-        call repeat_string
-
-        ; find the number of sectors needed
-        ; t = N * string_length // 512
-        xor ax, ax
-        mov ax, [N]
-        mul dx
-        
-        mov dx, 0
-        mov bx, 8
-        div bx ; al - quotient, ah - remainder
-
-        mov al, ah
-        call print_char
-
-        cmp ah, 0
-        je write_step
-        inc al
-
-        ; take the repeated text and store it to floppy
-        write_step:
-        mov dh, [head]
-        mov ch, [track]
-        mov cl, [sector]
-        xor bx, bx
-        mov es, bx
-        mov bx, buffer + 200h
-        call write_to_floppy
-
-        ret
 
 get_string_length:
     ; parameters
@@ -244,9 +310,9 @@ write:
         jmp loop ; back from the start
 
     enter:
+        cmp bx, 0
+        je loop
         call new_line
-        cmp bx, 0 ; check if we are at the first column
-        je loop ; if we are then go to the main loop
         ret
 
     backspace:
@@ -357,16 +423,32 @@ print:
 break:
     ret ; pop the call address, and go there
 
+print_char:
+    ; parameters: al - register
+    mov ah, 0x0E
+    int 10h
+    ret
+
 
 ; --- Data section ---
 frunze_signature db "@@@FAF-212 Vladislav FRUNZE###", 0
 chiper_signature db "@@@FAF-212 Andreea CHIPER###", 0
 manole_signature db "@@@FAF-212 Andreea MANOLE###", 0
 valid db "T", 0
+error db "Invalid command", 0
 head db 0, 0
 track db 0, 0
 sector db 0, 0
 N db 0, 0
 prompt db '>', 0
-command db "w 1 66 14 3 :text", 0
+errorCodeLabel db "Error code: ", 0
+errorCode db 0, 0, "H", 0
+
+headLabel db "Head:", 0
+trackLabel db "Track:", 0
+sectorLabel db "Sector:", 0
+NLabel db "N:", 0
+textLabel db "Text:", 0
+
+rs_length dw 0
 buffer dw 7e00h + 200h + 200h
