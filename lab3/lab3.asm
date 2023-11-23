@@ -215,16 +215,129 @@ execute_command:
     elif_r:
         cmp byte [si], 'r'
         jne elif_m
-        cmp byte [si + 1], 0
-        jne unknown_command
-        ret
+        if_r:
+            cmp byte [si + 1], 0
+            jne unknown_command
+
+            ; print head
+            mov si, headLabel
+            call print
+            ; obtains the head and converts it to numerical
+            mov si, di
+            call write
+            mov dl, 0
+            call convert_to_numerical
+            cmp byte [valid], "F"
+            je break
+            mov byte [head], al
+
+            ; print track
+            mov si, trackLabel
+            call print
+            ; takes the track and converts it to numerical
+            mov si, di
+            call write
+            mov dl, 0
+            call convert_to_numerical
+            cmp byte [valid], "F"
+            je break
+            mov byte [track], al
+
+            ; print sector
+            mov si, sectorLabel
+            call print
+            ; takes the sector and converts it to number
+            mov si, di
+            call write
+            mov dl, 0
+            call convert_to_numerical
+            cmp byte [valid], "F"
+            je break
+            mov byte [sector], al
+
+            ; print N
+            mov si, NLabel
+            call print
+            ; takes N and converts it to number
+            mov si, di
+            call write
+            mov dl, 0
+            call convert_to_numerical
+            cmp byte [valid], "F"
+            je break
+            cmp al, 0
+            je unknown_command
+            mov byte [N], al
+
+
+
+            ; print Adress label
+            mov si, AddressLabel
+            call print
+            mov si, di
+            call write
+            
+            ; Read memory address from the user
+            mov ah, 0Ah
+            mov dx, address
+            int 16h   
+
+            mov si, address+4
+            call convert_digit
+            mov bx, ax  ; High part of the address
+            
+            mov si, address+4
+            call convert_digit
+            mov cx, ax  ; Low part of the address
+           
+            mov dh, [head]
+            mov ch, [track]
+            mov cl, [sector]
+            mov ah, 02h 
+            mov dl, 0 ; driver
+            mov es, bx ; first part
+            mov bx, cx ; second part
+            mov al, N ; number of sectors to read
+            int 13h ; execute the command
+            
+            ret
+        
+        
+
+convert_digit:
+    xor ax, ax
+    xor cl, cl
+    mov cl, byte [si]  ; Load ASCII character
+    cmp cl, 0
+    je  done_conversion 
+    sub cl, '0'         ; Convert ASCII to numeric value
+    add ax, cx
+    inc si                
+    jmp convert_digit
+done_conversion:
+    ret
 
     elif_m:
         cmp byte [si], 'm'
         jne unknown_command
         cmp byte [si + 1], 0
         jne unknown_command
+        if_m:
+
+        ;lables to input N,h,s,t,q
+
+        mov ah, 0x03   ; AH=3 (write sector to floppy)
+        ;mov al, Q ; Number of sectors to write
+        mov ch, [head]   ; Cylinder (Head is assumed to be in CH)
+        mov cl, [sector] ; Sector
+        mov dh, [track]  ; Track
+        mov dl, 0      ; Drive number (0 for floppy disk)
+        int 0x13  
         ret
+
+
+
+
 
 convert_2hex_to_str:
     ; parameters: ah - hex number of 2 digits; 
@@ -443,12 +556,16 @@ N db 0, 0
 prompt db '>', 0
 errorCodeLabel db "Error code: ", 0
 errorCode db 0, 0, "H", 0
+address db 8
+
+
 
 headLabel db "Head:", 0
 trackLabel db "Track:", 0
 sectorLabel db "Sector:", 0
 NLabel db "N:", 0
 textLabel db "Text:", 0
+AddressLabel db "Address:", 0
 
 rs_length dw 0
 buffer dw 7e00h + 200h + 200h
