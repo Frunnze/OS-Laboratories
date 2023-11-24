@@ -215,107 +215,106 @@ execute_command:
     elif_r:
         cmp byte [si], 'r'
         jne elif_m
-        if_r:
-            cmp byte [si + 1], 0
-            jne unknown_command
+        cmp byte [si + 1], 0
+        jne unknown_command
 
-            ; print head
-            mov si, headLabel
-            call print
-            ; obtains the head and converts it to numerical
-            mov si, di
-            call write
-            mov dl, 0
-            call convert_to_numerical
-            cmp byte [valid], "F"
-            je break
-            mov byte [head], al
+        ; print head
+        mov si, headLabel
+        call print
+        ; obtains the head and converts it to numerical
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        mov byte [head], al
 
-            ; print track
-            mov si, trackLabel
-            call print
-            ; takes the track and converts it to numerical
-            mov si, di
-            call write
-            mov dl, 0
-            call convert_to_numerical
-            cmp byte [valid], "F"
-            je break
-            mov byte [track], al
+        ; print track
+        mov si, trackLabel
+        call print
+        ; takes the track and converts it to numerical
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        mov byte [track], al
 
-            ; print sector
-            mov si, sectorLabel
-            call print
-            ; takes the sector and converts it to number
-            mov si, di
-            call write
-            mov dl, 0
-            call convert_to_numerical
-            cmp byte [valid], "F"
-            je break
-            mov byte [sector], al
+        ; print sector
+        mov si, sectorLabel
+        call print
+        ; takes the sector and converts it to number
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        mov byte [sector], al
 
-            ; print N
-            mov si, NLabel
-            call print
-            ; takes N and converts it to number
-            mov si, di
-            call write
-            mov dl, 0
-            call convert_to_numerical
-            cmp byte [valid], "F"
-            je break
-            cmp al, 0
-            je unknown_command
-            mov byte [N], al
-
+        ; print N
+        mov si, NLabel
+        call print
+        ; takes N and converts it to number
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        cmp al, 0
+        je unknown_command
+        mov byte [N], al
 
 
-            ; print Adress label
-            mov si, AddressLabel
-            call print
-            mov si, di
-            call write
-            
-            ; Read memory address from the user
-            mov ah, 0Ah
-            mov dx, address
-            int 16h   
+        mov si, A1Label
+        call print
+        ; write A1
+        mov si, di
+        call write
+        call convert_ascii_hex_to_numerical_hex ; returns ax
+        cmp byte [valid], "F"
+        je break
+        xor es, es
+        mov es, ax
 
-            mov si, address+4
-            call convert_digit
-            mov bx, ax  ; High part of the address
-            
-            mov si, address+4
-            call convert_digit
-            mov cx, ax  ; Low part of the address
-           
+        mov si, A2Label
+        call print
+        ; write A2
+        mov si, di
+        call write
+        call convert_ascii_hex_to_numerical_hex ; returns ax
+        cmp byte [valid], "F"
+        je break
+        xor bx, bx
+        mov bx, ax
+
+        write_step:
+            mov al, [N]
             mov dh, [head]
             mov ch, [track]
             mov cl, [sector]
-            mov ah, 02h 
-            mov dl, 0 ; driver
-            mov es, bx ; first part
-            mov bx, cx ; second part
-            mov al, N ; number of sectors to read
-            int 13h ; execute the command
-            
-            ret
-        
-        
+            call write_to_floppy
 
-convert_digit:
-    xor ax, ax
-    xor cl, cl
-    mov cl, byte [si]  ; Load ASCII character
-    cmp cl, 0
-    je  done_conversion 
-    sub cl, '0'         ; Convert ASCII to numeric value
-    add ax, cx
-    inc si                
-    jmp convert_digit
-done_conversion:
-    ret
+        ; error code
+        mov cl, ah
+        mov si, errorCodeLabel
+        call print
+
+        mov ah, cl
+        call convert_2hex_to_str
+        mov si, errorCode
+        call print
+        call new_line
+
+        ; print string from ram
+        mov ds, es
+        mov si, bx
+        call print
+
+        ret
 
     elif_m:
         cmp byte [si], 'm'
@@ -336,7 +335,36 @@ done_conversion:
         ret
 
 
+convert_ascii_hex_to_numerical_hex:
+    ; parameters: si - start of hex string
+    ; returns: ax - hex number
 
+    xor ax, ax
+    xor cx, cx
+    convert_ascii_hex_to_numerical_hex_loop:
+        xor cl, cl
+        mov cl, byte [si]  ; Load ASCII character
+        cmp cl, 0
+        je break 
+
+        cmp byte [si], '0'
+        jb unknown_command
+
+        cmp byte [si], '9'
+        jb convert_byte ; between 0-9
+
+        cmp byte [si], 'a'
+        jb unknown_command
+
+        cmp byte [si], 'f'
+        ja unknown_command
+        
+        convert_byte:
+            sub cl, '0'         ; Convert ASCII to numeric value
+            add ax, cx
+            shl ax, 4
+            inc si                
+            jmp convert_ascii_hex_to_numerical_hex_loop
 
 
 convert_2hex_to_str:
@@ -565,7 +593,8 @@ trackLabel db "Track:", 0
 sectorLabel db "Sector:", 0
 NLabel db "N:", 0
 textLabel db "Text:", 0
-AddressLabel db "Address:", 0
+A1Label db "A1:", 0
+A2Label db "A2:", 0
 
 rs_length dw 0
 buffer dw 7e00h + 200h + 200h
