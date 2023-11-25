@@ -97,55 +97,21 @@ execute_command:
         cmp byte [si + 1], 0
         jne unknown_command
 
-        ; print head
-        mov si, headLabel
-        call print
-        ; obtains the head and converts it to numerical
-        mov si, di
-        call write
-        mov dl, 0
-        call convert_to_numerical
+        call input_head
         cmp byte [valid], "F"
         je break
-        mov byte [head], al
 
-        ; print track
-        mov si, trackLabel
-        call print
-        ; takes the track and converts it to numerical
-        mov si, di
-        call write
-        mov dl, 0
-        call convert_to_numerical
+        call input_track
         cmp byte [valid], "F"
         je break
-        mov byte [track], al
 
-        ; print sector
-        mov si, sectorLabel
-        call print
-        ; takes the sector and converts it to number
-        mov si, di
-        call write
-        mov dl, 0
-        call convert_to_numerical
+        call input_sector
         cmp byte [valid], "F"
         je break
-        mov byte [sector], al
 
-        ; print N
-        mov si, NLabel
-        call print
-        ; takes N and converts it to number
-        mov si, di
-        call write
-        mov dl, 0
-        call convert_to_numerical
+        call input_N
         cmp byte [valid], "F"
         je break
-        cmp al, 0
-        je unknown_command
-        mov byte [N], al
 
         ; print text label
         mov si, textLabel
@@ -169,7 +135,7 @@ execute_command:
         call new_line
 
         ; find the number of sectors needed
-        ; sectors = N * string_length // 512
+        ; sectors = N * string_length // 512 <------change the approache
         xor ax, ax
         mov ax, [N]
         mul dx 
@@ -218,56 +184,10 @@ execute_command:
         cmp byte [si + 1], 0
         jne unknown_command
 
-        ; print head
-        mov si, headLabel
-        call print
-        ; obtains the head and converts it to numerical
-        mov si, di
-        call write
-        mov dl, 0
-        call convert_to_numerical
+        ; returns head, track, sector, N
+        ;call add_entries
         cmp byte [valid], "F"
         je break
-        mov byte [head], al
-
-        ; print track
-        mov si, trackLabel
-        call print
-        ; takes the track and converts it to numerical
-        mov si, di
-        call write
-        mov dl, 0
-        call convert_to_numerical
-        cmp byte [valid], "F"
-        je break
-        mov byte [track], al
-
-        ; print sector
-        mov si, sectorLabel
-        call print
-        ; takes the sector and converts it to number
-        mov si, di
-        call write
-        mov dl, 0
-        call convert_to_numerical
-        cmp byte [valid], "F"
-        je break
-        mov byte [sector], al
-
-        ; print N
-        mov si, NLabel
-        call print
-        ; takes N and converts it to number
-        mov si, di
-        call write
-        mov dl, 0
-        call convert_to_numerical
-        cmp byte [valid], "F"
-        je break
-        cmp al, 0
-        je unknown_command
-        mov byte [N], al
-
 
         mov si, A1Label
         call print
@@ -277,7 +197,8 @@ execute_command:
         call convert_ascii_hex_to_numerical_hex ; returns ax
         cmp byte [valid], "F"
         je break
-        xor es, es
+        xor cx, cx
+        mov es, cx
         mov es, ax
 
         mov si, A2Label
@@ -291,28 +212,33 @@ execute_command:
         xor bx, bx
         mov bx, ax
 
-        write_step:
-            mov al, [N]
-            mov dh, [head]
-            mov ch, [track]
-            mov cl, [sector]
-            call write_to_floppy
+        mov al, [N]
+        mov dh, [head]
+        mov ch, [track]
+        mov cl, [sector]
+        call write_to_floppy
 
         ; error code
         mov cl, ah
         mov si, errorCodeLabel
         call print
 
-        mov ah, cl
+        ;mov ah, cl
         call convert_2hex_to_str
         mov si, errorCode
         call print
         call new_line
 
         ; print string from ram
-        mov ds, es
-        mov si, bx
-        call print
+        call new_line
+        xor cx, cx
+        mov cx, es
+        ;mov ds, cx ; bug with ds
+        ;mov si, bx ; here also
+
+        ;mov al, si
+        ;call print_char
+        ;call print
 
         ret
 
@@ -321,19 +247,79 @@ execute_command:
         jne unknown_command
         cmp byte [si + 1], 0
         jne unknown_command
-        if_m:
+        ;if_m:
 
         ;lables to input N,h,s,t,q
 
-        mov ah, 0x03   ; AH=3 (write sector to floppy)
+        ;mov ah, 0x03   ; AH=3 (write sector to floppy)
         ;mov al, Q ; Number of sectors to write
-        mov ch, [head]   ; Cylinder (Head is assumed to be in CH)
-        mov cl, [sector] ; Sector
-        mov dh, [track]  ; Track
-        mov dl, 0      ; Drive number (0 for floppy disk)
-        int 0x13  
+        ;mov ch, [head]   ; Cylinder (Head is assumed to be in CH)
+        ;mov cl, [sector] ; Sector
+        ;mov dh, [track]  ; Track
+        ;mov dl, 0      ; Drive number (0 for floppy disk)
+        ;int 0x13  
         ret
 
+    input_head:
+        ; parameters: di - the start where to write
+        ; returns: head - 1 byte variable
+
+        ; print head label
+        mov si, headLabel
+        call print
+        ; obtain the head and convert it to decimal
+        mov si, di
+        call write
+        mov dl, 0 ; end converting when there is nothing
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        mov byte [head], al ; values 1/0
+        ret
+
+    input_track:
+        ; print track
+        mov si, trackLabel
+        call print
+        ; takes the track and converts it to decimal
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        mov byte [track], al ; interval [0, 80]
+        ret
+
+    input_sector:
+        ; print sector
+        mov si, sectorLabel
+        call print
+        ; takes the sector and converts it to decimal
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        mov byte [sector], al ; interval [1, 18]
+        ret
+
+    input_N:
+        ; print N
+        mov si, NLabel
+        call print
+        ; takes N and converts it to decimal
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        cmp al, 0
+        je unknown_command
+        mov byte [N], al ; interval [1, 30000]
+        ret
 
 convert_ascii_hex_to_numerical_hex:
     ; parameters: si - start of hex string
@@ -580,21 +566,20 @@ error db "Invalid command", 0
 head db 0, 0
 track db 0, 0
 sector db 0, 0
-N db 0, 0
+N dw 0, 0
 prompt db '>', 0
 errorCodeLabel db "Error code: ", 0
 errorCode db 0, 0, "H", 0
-address db 8
-
-
 
 headLabel db "Head:", 0
 trackLabel db "Track:", 0
-sectorLabel db "Sector:", 0
-NLabel db "N:", 0
 textLabel db "Text:", 0
+sectorLabel db "Sector:", 0
 A1Label db "A1:", 0
 A2Label db "A2:", 0
+NLabel db "N:", 0
 
 rs_length dw 0
-buffer dw 7e00h + 200h + 200h
+buffer dw 7c00h + 200h + 200h + 200h + 200h
+
+;times (2048 - ($ - $$)) db 0x00
