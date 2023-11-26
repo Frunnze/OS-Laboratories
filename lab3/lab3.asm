@@ -4,7 +4,7 @@ org 7c00h ; begin from this address
 
 ; --- Bootloader manager --- 
 ; TASK 0: Load the extra code to the next 512 bytes of the RAM.
-mov al, 2 ; number of sectors to read
+mov al, 3 ; number of sectors to read
 mov dh, 0 ; head number
 mov ch, 0 ; track
 mov cl, 2 ; sector
@@ -90,6 +90,7 @@ execute_command:
     mov byte [head], 0
     mov byte [track], 0
     mov byte [sector], 0
+    mov word [N], 0
 
     cmp byte [si], 'w'
     jne elif_r
@@ -116,66 +117,115 @@ execute_command:
         ; print text label
         mov si, textLabel
         call print
-        ; take the text and repeat it in the ram
+        ; input the text
         mov si, di ; text start
         call write
-        xor ax, ax
-        mov ax, si
-        xor dx, dx
-        call get_string_length ; dx
-        xor bx, bx
-        mov bx, [N]
-        mov di, buffer + 200h ; page 5
-        call repeat_string
-
-        ; empty line and the sequence
-        mov si, ax
+        ; display empty line and the prompt text
+        mov [text_start_index], si ; save prompt text start
         call new_line
         call print
         call new_line
 
-        ; find the number of sectors needed
-        ; sectors = N * string_length // 512 <------change the approache
-        xor ax, ax
-        mov ax, [N]
-        mul dx 
-        mov [rs_length], ax       
+        ; move to si the beginning of the text in the prompt
+        mov si, [text_start_index]
+        ; move to di the start of 512 bytes of the next page (after prompt page) in RAM
+        mov di, buffer+200h 
+        copy_to_floppy_loop:
+            ; copy each byte from [si] and move it to [di]
+            mov al, [si]
+            mov [di], al
 
-        xor dx, dx
-        mov bx, 512 ; divider
-        div bx ; ax - quotient, dx - remainder
-        cmp dx, 0 ; if remainder is 0
-        je write_step ; go and write to the floppy
-        inc al ; otherwise add an additional sector
+            ; increase si (si until end of text in prompt)
+            ; you move si to the start of text if si is at end of text
+            inc si
+            cmp byte [si], 0
+            jne continue_copy_to_floppy
+                ; if [si] == 0
+                ; substract 1 from N if equal
+                xor dx, dx
+                mov dx, [N]
+                sub dx, 1
+                mov [N], dx
+                ; move si at the text start
+                mov si, [text_start_index]
 
-        ; take the repeated text and store it to floppy
-        write_step:
-            mov dh, [head]
-            mov ch, [track]
-            mov cl, [sector]
-            xor bx, bx
-            mov es, bx
-            mov bx, buffer + 200h ; page 5 (where the repeated text is)
-            call write_to_floppy
+                ; continue until N is zero 
+                cmp word [N], 0
+                je insert_to_floppy_step
 
-        ; error code
-        mov cl, ah
-        mov si, errorCodeLabel
-        call print
+            continue_copy_to_floppy:
+                ; if [si] != 0
+                ; increase di until 512 bytes are written to the page (if)
+                inc di
+                cmp di, buffer+200h+200h
+                jne copy_to_floppy_loop
 
-        mov ah, cl
-        call convert_2hex_to_str
-        mov si, errorCode
-        call print
-        call new_line
+            insert_to_floppy_step:
+                ; save si
+                mov word [si_saver], si
 
-        ; clear the pages with the repeated string
-        cmp word [rs_length], 0
-        je break
-        mov di, buffer + 200h
-        mov cx, [rs_length]
-        call clear_buffer
+                ; if the 512 bytes are filled move them to the floppy
+                call insert_data_to_one_fd_sector
 
+                ; clear this page in ram of 512 bytes that were used
+                mov di, buffer+200h
+                mov cx, 512
+                call clear_buffer
+
+                ; error code
+                cmp ah, 0
+                je check_N
+                    ; != then display error and break
+                    call display_error
+                    jmp break
+                check_N:
+                    ; == then check if N is zero
+                    cmp word [N], 0 
+                    jne set_the_write_vars
+                        ; if [N] == 0, display error and break
+                        call display_error
+                        jmp break
+                
+                set_the_write_vars:
+                ; give to di the start address of the page
+                mov di, buffer+200h
+                mov si, word [si_saver]
+
+                ; increase +1 the number of the sector (if 18 then 1)
+                mov bx, 0
+                mov bl, [sector]
+                cmp bl, 18
+                jne increase_sector_by_one
+                    ; if [sector] == 18
+                    mov byte [sector], 1
+
+                    ; change track when 18 sectors (if 80 tracks then head = 1)
+                    mov bl, byte [track]
+                    cmp bl, 79
+                    jne track_not_79
+                        ; if [track] == 79
+                        cmp byte [head], 0
+                        jne head_is_one
+                            ; if [head] == 0
+                            mov byte [track], 0
+                            mov byte [head], 1
+                            jmp copy_to_floppy_loop
+                        head_is_one:
+                            ; if [head] == 1
+                            inc bl
+                            mov [track], bl
+                            jmp copy_to_floppy_loop
+                    track_not_79:
+                        ; if [track] != 79
+                        inc bl
+                        mov [track], bl
+                        jmp copy_to_floppy_loop
+
+                increase_sector_by_one:
+                    ; if [sector] != 18
+                    inc bl
+                    mov byte [sector], bl
+                    jmp copy_to_floppy_loop
         ret
 
     elif_r:
@@ -186,53 +236,53 @@ execute_command:
 
         ; returns head, track, sector, N
         ;call add_entries
-        cmp byte [valid], "F"
-        je break
+        ;cmp byte [valid], "F"
+        ;je break
 
-        mov si, A1Label
-        call print
+        ;mov si, A1Label
+        ;call print
         ; write A1
-        mov si, di
-        call write
-        call convert_ascii_hex_to_numerical_hex ; returns ax
-        cmp byte [valid], "F"
-        je break
-        xor cx, cx
-        mov es, cx
-        mov es, ax
+        ;mov si, di
+        ;call write
+        ;call convert_ascii_hex_to_numerical_hex ; returns ax
+        ;cmp byte [valid], "F"
+        ;je break
+        ;xor cx, cx
+        ;mov es, cx
+        ;mov es, ax
 
-        mov si, A2Label
-        call print
+        ;mov si, A2Label
+        ;call print
         ; write A2
-        mov si, di
-        call write
-        call convert_ascii_hex_to_numerical_hex ; returns ax
-        cmp byte [valid], "F"
-        je break
-        xor bx, bx
-        mov bx, ax
+        ;mov si, di
+        ;call write
+        ;call convert_ascii_hex_to_numerical_hex ; returns ax
+        ;cmp byte [valid], "F"
+        ;je break
+        ;xor bx, bx
+        ;mov bx, ax
 
-        mov al, [N]
-        mov dh, [head]
-        mov ch, [track]
-        mov cl, [sector]
-        call write_to_floppy
+        ;mov al, [N]
+        ;mov dh, [head]
+        ;mov ch, [track]
+        ;mov cl, [sector]
+        ;call write_to_floppy
 
         ; error code
-        mov cl, ah
-        mov si, errorCodeLabel
-        call print
+        ;mov cl, ah
+        ;mov si, errorCodeLabel
+        ;call print
 
         ;mov ah, cl
-        call convert_2hex_to_str
-        mov si, errorCode
-        call print
-        call new_line
+        ;call convert_2hex_to_str
+        ;mov si, errorCode
+        ;call print
+        ;call new_line
 
         ; print string from ram
-        call new_line
-        xor cx, cx
-        mov cx, es
+        ;call new_line
+        ;xor cx, cx
+        ;mov cx, es
         ;mov ds, cx ; bug with ds
         ;mov si, bx ; here also
 
@@ -316,9 +366,32 @@ execute_command:
         call convert_to_numerical
         cmp byte [valid], "F"
         je break
-        cmp al, 0
+        cmp ax, 0
         je unknown_command
-        mov byte [N], al ; interval [1, 30000]
+        mov word [N], ax ; interval [1, 30000]
+        ret
+
+    insert_data_to_one_fd_sector:
+        mov al, 1
+        mov dh, [head]
+        mov ch, [track]
+        mov cl, [sector]
+        xor bx, bx
+        mov es, bx
+        mov bx, buffer+200h
+        call write_to_floppy
+        ret
+
+    display_error:
+        mov cl, ah
+        mov si, errorCodeLabel
+        call print
+
+        mov ah, cl
+        call convert_2hex_to_str
+        mov si, errorCode
+        call print
+        call new_line
         ret
 
 convert_ascii_hex_to_numerical_hex:
@@ -378,8 +451,9 @@ convert_to_numerical:
     ; si - address of the string; dl - delimiter
     ; returns ax - number and si - index
 
-    xor ax, ax
-    xor bx, bx
+    mov ax, 0
+    mov bx, 0
+    mov cx, 10
     convert_loop:
         cmp byte [si], '0'
         jb unknown_command
@@ -389,8 +463,7 @@ convert_to_numerical:
 
         mov bl, [si]
         sub bl, '0'
-        mov cl, 10
-        mul cl
+        mul cx
         add ax, bx
 
         inc si
@@ -578,8 +651,8 @@ sectorLabel db "Sector:", 0
 A1Label db "A1:", 0
 A2Label db "A2:", 0
 NLabel db "N:", 0
-
-rs_length dw 0
-buffer dw 7c00h + 200h + 200h + 200h + 200h
+text_start_index dw 0
+si_saver dw 0
+buffer dw 7c00h+200h+200h+200h+200h
 
 ;times (2048 - ($ - $$)) db 0x00
