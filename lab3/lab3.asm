@@ -4,7 +4,7 @@ org 7c00h ; begin from this address
 
 ; --- Bootloader manager --- 
 ; TASK 0: Load the extra code to the next 512 bytes of the RAM.
-mov al, 3 ; number of sectors to read
+mov al, 4 ; number of sectors to read
 mov dh, 0 ; head number
 mov ch, 0 ; track
 mov cl, 2 ; sector
@@ -97,6 +97,7 @@ call write_to_floppy
 
 ; TASK 2.1: KEYBOARD ==> FLOPPY
 ; write the text from keyboard to ram/buffer;
+mov byte [current_video_page], 0
 main_loop:
     ; clear the prompt page (4th page)
     mov di, buffer
@@ -238,34 +239,25 @@ execute_command:
                                     mov di, buffer+200h
                                     mov si, word [si_saver]
 
-                                    ; increase +1 the number of the sector (if 18 then 1)
+                                    ; increase +1 the number of the sector
                                     mov bx, 0
                                     mov bl, [sector]
                                     cmp bl, 18
                                     jne increase_sector_by_one
-                                        ; if [sector] == 18
+                                        ; if [sector] == 18 ;
                                         mov byte [sector], 1
 
-                                        ; change track when 18 sectors (if 80 tracks then head = 1)
-                                        mov bl, byte [track]
-                                        cmp bl, 79
-                                        jne track_not_79
-                                            ; if [track] == 79
-                                            cmp byte [head], 0
-                                            jne head_is_one
-                                                ; if [head] == 0
-                                                mov byte [track], 0
-                                                mov byte [head], 1
-                                                jmp copy_to_floppy_loop
-                                            head_is_one:
-                                                ; if [head] == 1
-                                                inc bl
-                                                mov [track], bl
-                                                jmp copy_to_floppy_loop
-                                        track_not_79:
-                                            ; if [track] != 79
+                                        cmp byte [head], 1
+                                        jne head_is_zero
+                                            ; if [head] == 1 - move to next track
+                                            mov bl, byte [track]
                                             inc bl
-                                            mov [track], bl
+                                            mov byte [track], bl
+                                            mov byte [head], 0
+                                            jmp copy_to_floppy_loop
+                                        head_is_zero:
+                                            ; if [head] == 0 - move to the other side
+                                            mov byte [head], 1
                                             jmp copy_to_floppy_loop
 
                                     increase_sector_by_one:
@@ -331,12 +323,55 @@ execute_command:
         call print
         call new_line
 
+        ; get the cursor location
+        ;get_cursor_position:
+            ; Parameters:
+            ;   bh - video page number
+            ; Returns: 
+            ;   CH - cursor starting scan-line
+            ;   CL - cursor ending scan-line
+            ;   DH - current row (0-based)
+            ;   DL - current column (0-based)
+        ;    mov ah, 03h
+        ;    mov bh, byte [current_video_page]
+        ;    int 10h
+        ;    ret
+
+        ; save the row of the cursor: start_row
+        ;mov byte [start_row], dh
+
+        ; loop
+        ; get the cursor location
+        ; INT 10H 05H: Select Video Page
+        ; display string with changing cursor until N = 0
+        ; end loop
+
+        ; get cursor location: end_row
+        ; video_pages = (end_row - start_row) // 25
+
+        ; loop
+        ; allow write only of the space button
+        ; video_pages -= 1
+        ; INT 10H 05H: Select Video Page
+        ; if video_pages = 0, call break from loop
+        ; end loop
+
+        ; call new line
+        ; initialize registers
+
+        ;mov ax, 1300h
+        ;mov bh, byte [current_video_page]
+        ;mov bl, 0
+        ;mov cx, 512
+        ;mov 
+
+
         ; print string from ram
         mov bx, word [address1]
         mov es, bx
         mov bx, word [address2]
+        mov bp, bx
         call new_line
-        mov ax, 0
         print_from_ram_loop:
             mov al, [es:bx]
             cmp al, 0
@@ -615,6 +650,9 @@ write:
         cmp al, 0x0D ; check if enter is pressed
         je enter ; if the enter is pressed
 
+        cmp al, ' '
+        je space
+
         cmp bx, 256 ; check if 256 chars are written
         je loop ; if true allow only backspace and enter
 
@@ -624,6 +662,14 @@ write:
         stosb ; store char into the buffer, and increment DI (destination index)
         inc bx ; the counter of chars
         jmp loop ; back from the start
+
+    space:
+        mov ah, 05h
+        mov al, byte [current_video_page]
+        inc al
+        mov byte [current_video_page], al
+        int 10h
+        jmp loop
 
     enter:
         cmp bx, 0
@@ -767,11 +813,12 @@ sectorLabel db "Sector:", 0
 A1Label db "A1:", 0
 A2Label db "A2:", 0
 NLabel db "N:", 0
+current_video_page db 0
 text_start_index dw 0
 si_saver dw 0
 temp dw 0
 address1 dw 0
 address2 dw 0
-buffer dw 7c00h+200h+200h+200h+200h
+buffer dw 7c00h+200h+200h+200h+200h+200h
 
 times (2048 - ($ - $$)) db 0x00
