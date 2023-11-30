@@ -33,14 +33,14 @@ call repeat_string
 ; write frunze's extended signature to the first sector
 mov al, 1
 mov dh, 0
-mov ch, 66 ; 1201//18=66
-mov cl, 13 ; 1201%18=13
+mov ch, 33 ; 1201//36=66
+mov cl, 13 ; 1201%36=13 > 18 then dh 1
 xor bx, bx
 mov es, bx
 mov bx, buffer
 call write_to_floppy
 ; write frunze's extended signature to the last sector
-mov ch, 68 ; 1230//18=68
+mov ch, 34 ; 1230//18=68
 mov cl, 6 ; 1230%18=6
 call write_to_floppy
 
@@ -94,9 +94,7 @@ mov ch, 76 ; 1380//18=76
 mov cl, 12 ; 1380%18=12
 call write_to_floppy
 
-
-; TASK 2.1: KEYBOARD ==> FLOPPY
-; write the text from keyboard to ram/buffer;
+; Main loop
 mov byte [current_video_page], 0
 main_loop:
     ; clear the prompt page (4th page)
@@ -125,10 +123,8 @@ main_loop:
 
     jmp main_loop      
 
-jmp $
 
-
-; --- Functions section ---
+; ----- Functions section -----
 execute_command:
     mov byte [valid], "T"
     mov byte [head], 0
@@ -138,7 +134,9 @@ execute_command:
     mov word [temp], 0 
     mov word [address1], 0
     mov word [address2], 0  
+    mov word [Q], 0
 
+    ; ------ TASK 2.1: KEYBOARD ==> FLOPPY ------
     cmp byte [si], 'w'
     jne elif_r
     if_w:
@@ -267,6 +265,7 @@ execute_command:
                                         jmp copy_to_floppy_loop
         ret
 
+    ; ------ TASK 2.2: FLOPPY ==> RAM ------
     elif_r:
         cmp byte [si], 'r'
         jne elif_m
@@ -323,80 +322,102 @@ execute_command:
         call print
         call new_line
 
-        ; get the cursor location
-        ;get_cursor_position:
-            ; Parameters:
-            ;   bh - video page number
-            ; Returns: 
-            ;   CH - cursor starting scan-line
-            ;   CL - cursor ending scan-line
-            ;   DH - current row (0-based)
-            ;   DL - current column (0-based)
-        ;    mov ah, 03h
-        ;    mov bh, byte [current_video_page]
-        ;    int 10h
-        ;    ret
-
-        ; save the row of the cursor: start_row
-        ;mov byte [start_row], dh
-
-        ; loop
-        ; get the cursor location
-        ; INT 10H 05H: Select Video Page
-        ; display string with changing cursor until N = 0
-        ; end loop
-
-        ; get cursor location: end_row
-        ; video_pages = (end_row - start_row) // 25
-
-        ; loop
-        ; allow write only of the space button
-        ; video_pages -= 1
-        ; INT 10H 05H: Select Video Page
-        ; if video_pages = 0, call break from loop
-        ; end loop
-
-        ; call new line
-        ; initialize registers
-
-        ;mov ax, 1300h
-        ;mov bh, byte [current_video_page]
-        ;mov bl, 0
-        ;mov cx, 512
-        ;mov 
-
-
         ; print string from ram
-        mov bx, word [address1]
-        mov es, bx
-        mov bx, word [address2]
-        mov bp, bx
-        call new_line
+        mov si, word [address1]
+        mov es, si
+        mov si, word [address2]
+        mov word [temp], 0
+
+        ; write every char
         print_from_ram_loop:
-            mov al, [es:bx]
-            cmp al, 0
-            je finish_printing_to_ram
-            mov ah, 0x0E
-            int 0x10
+            ; get the cursor position
+            mov ah, 03h
+            mov bh, 0
+            int 10h ; returns: ch, cl, dh (row), dl (column)
+            xor cx, cx
 
-            inc bx
-            cmp bx, 0xFFFF
-            jne print_from_ram_loop
-                ; if bx == FFFF
-                mov bx, 0
-                mov bx, es
-                inc bx
-                mov es, bx
-                mov bx, 0
-                jmp print_from_ram_loop
+            cmp dl, 79
+            jne write_with_TTY
+                ; if dl == 79
+                cmp dh, 24
+                jne write_with_TTY
+                    ; if dh == 24
+                    ; write the char at the cursor not with TTY
+                    mov ah, 0aH
+                    mov al, [es:si]
+                    mov bh, 0
+                    mov cx, 1
+                    int 10h
 
-        finish_printing_to_ram:
-        mov bx, 0
-        mov es, bx
-        call new_line
+                    wait_for_space:
+                        mov ah, 0
+                        int 16h
+                        cmp al, ' '
+                        jne wait_for_space
+                            ; if al == space
+                            mov cx, 0
+                            new_line_loop:
+                                call new_line
+                                inc cx
+                                cmp cx, 25
+                                jne new_line_loop
 
+                            ; move the cursor to the top left corner
+                            mov ah, 02h
+                            mov bh, 0
+                            mov dh, 0
+                            mov dl, 0
+                            int 10h
+
+                    jmp break_point
+
+            write_with_TTY:
+                ; if dl != 79
+                mov ah, 0eh
+                mov al, [es:si]
+                mov bl, 0
+                int 10h
+
+            ; break point (N == 0)
+            break_point:
+                mov cx, word [temp]
+                inc cx
+                mov word [temp], cx
+                cmp word [temp], 512
+                jne init_ram_vars
+                    ; if cx == 512
+                    mov word [temp], 0
+
+                    mov cx, word [N]
+                    dec cx
+                    mov word [N], cx
+
+                    cmp word [N], 0
+                    jne init_ram_vars
+                        ; if N == 0
+                        jmp finish_printing_from_ram
+
+            init_ram_vars:
+                cmp si, 0xFFFF
+                jne add_one_to_si
+                    ; if si == FFFF
+                    mov si, es
+                    inc si
+                    mov es, si
+                    mov si, 0
+                    jmp print_from_ram_loop
+                add_one_to_si:
+                    ; if si != FFFF
+                    inc si
+                    jmp print_from_ram_loop
+
+            finish_printing_from_ram:
+                mov si, 0
+                mov es, si
+                call new_line
         ret
 
+    ; ------ TASK 2.3: RAM ==> FLOPPY ------
     elif_m:
         cmp byte [si], 'm'
         jne unknown_command
@@ -415,10 +436,6 @@ execute_command:
         cmp byte [valid], "F"
         je break
 
-        call input_N
-        cmp byte [valid], "F"
-        je break
-
         call input_A1
         cmp byte [valid], "F"
         je break
@@ -429,8 +446,201 @@ execute_command:
         je break
         mov word [address2], ax
 
+        call input_Q
+        cmp byte [valid], "F"
+        je break
+
+        mov cx, word [Q]
+        mov word [Q_init], cx
+        mov cx, word [address1]
+        mov word [address1_init], cx
+        mov cx, word [address2]
+        mov word [address2_init], cx
+        loop_from_ram_to_floppy:
+            ; breaking point
+            mov cx, word [Q]
+            cmp cx, 512
+            jb write_the_rest_of_Q_bytes
+                ; if cx >= 512
+                sub cx, 512
+                mov word [Q], cx
+
+            ; to floppy
+            mov bx, word [address1]
+            mov es, bx
+            mov bx, word [address2]
+            mov al, 1
+            mov dh, [head]
+            mov ch, [track]
+            mov cl, [sector]
+            call write_to_floppy
+
+            ; error code
+            cmp ah, 0
+            je continue_ram_to_floppy
+                ; if error happened
+                call display_error
+                call break
+
+            continue_ram_to_floppy:
+            ; go to next page in ram
+            add bx, 0x200
+            jnc not_overflow
+                ; if overflow
+                mov bx, word [address1]
+                inc bx
+                mov word [address1], bx
+                mov bx, 0
+                mov word [address2], bx
+                jmp init_variables
+                
+            not_overflow:
+                ; if not overflow
+                mov word [address2], bx
+                jmp init_variables
+
+            init_variables:
+                ; increase +1 the number of the sector
+                mov bx, 0
+                mov bl, [sector]
+                cmp bl, 18
+                jne increase_sector_by_one2
+                    ; if [sector] == 18 ;
+                    mov byte [sector], 1
+
+                    cmp byte [head], 1
+                    jne head_is_zero2
+                        ; if [head] == 1 - move to next track
+                        mov bl, byte [track]
+                        inc bl
+                        mov byte [track], bl
+                        mov byte [head], 0
+                        jmp loop_from_ram_to_floppy
+                    head_is_zero2:
+                        ; if [head] == 0 - move to the other side
+                        mov byte [head], 1
+                        jmp loop_from_ram_to_floppy
+                increase_sector_by_one2:
+                    ; if [sector] != 18
+                    inc bl
+                    mov byte [sector], bl
+                    jmp loop_from_ram_to_floppy
+
+            write_the_rest_of_Q_bytes:
+                ; write the rest of bytes to buffer + 200h
+                mov di, buffer+200h
+                mov bx, word [address1]
+                mov es, bx
+                mov bx, word [address2]
+                rest_of_bytes_to_buffer_loop:
+                    ; copy each byte from [address1:address2] and move it to [di]
+                    mov al, [es:bx]
+                    mov [di], al
+
+                    mov dx, word [Q]
+                    dec dx
+                    mov word [Q], dx
+                    cmp dx, 0
+                    je finish_ram_to_floppy
+                    jmp rest_of_bytes_to_buffer_loop
+
+
+            finish_ram_to_floppy:
+                ; to floppy
+                mov bx, 0
+                mov es, bx
+                mov bx, buffer+200h
+                mov al, 1
+                mov dh, [head]
+                mov ch, [track]
+                mov cl, [sector]
+                call write_to_floppy
+
+                ; error
+                call display_error
+
+                ; print the Q bytes
+                mov si, word [address1_init]
+                mov es, si
+                mov si, word [address2_init]
+                print_from_ram_loop2:
+                    ; get the cursor position
+                    mov ah, 03h
+                    mov bh, 0
+                    int 10h ; returns: ch, cl, dh (row), dl (column)
+                    xor cx, cx
+
+                    cmp dl, 79
+                    jne write_with_TTY2
+                        ; if dl == 79
+                        cmp dh, 24
+                        jne write_with_TTY2
+                            ; if dh == 24
+                            ; write the char at the cursor not with TTY
+                            mov ah, 0aH
+                            mov al, [es:si]
+                            mov bh, 0
+                            mov cx, 1
+                            int 10h
+
+                            wait_for_space2:
+                                mov ah, 0
+                                int 16h
+                                cmp al, ' '
+                                jne wait_for_space2
+                                    ; if al == space
+                                    mov cx, 0
+                                    new_line_loop2:
+                                        call new_line
+                                        inc cx
+                                        cmp cx, 25
+                                        jne new_line_loop2
+
+                                    ; move the cursor to the top left corner
+                                    mov ah, 02h
+                                    mov bh, 0
+                                    mov dh, 0
+                                    mov dl, 0
+                                    int 10h
+
+                            jmp break_point2
+
+                    write_with_TTY2:
+                        ; if dl != 79
+                        mov ah, 0eh
+                        mov al, [es:si]
+                        mov bl, 0
+                        int 10h
+
+                    ; break point (Q == 0)
+                    break_point2:
+                        mov cx, word [Q_init]
+                        dec cx
+                        mov word [Q_init], cx
+                        cmp cx, 0
+                        je finish_printing_from_ram2
+
+                    init_ram_vars2:
+                        cmp si, 0xFFFF
+                        jne add_one_to_si2
+                            ; if si == FFFF
+                            mov si, es
+                            inc si
+                            mov es, si
+                            mov si, 0
+                            jmp print_from_ram_loop2
+                        add_one_to_si2:
+                            ; if si != FFFF
+                            inc si
+                            jmp print_from_ram_loop2
+
+                    finish_printing_from_ram2:
+                        mov si, 0
+                        mov es, si
+                        call new_line
         ret
 
+    ; --- Functions needed for the execution of the above function ---
     input_head:
         ; parameters: di - the start where to write
         ; returns: head - 1 byte variable
@@ -492,6 +702,22 @@ execute_command:
         mov word [N], ax ; interval [1, 30000]
         ret
 
+    input_Q:
+       ; print Q
+        mov si, QLabel
+        call print
+        ; takes Q and converts it to decimal
+        mov si, di
+        call write
+        mov dl, 0
+        call convert_to_numerical
+        cmp byte [valid], "F"
+        je break
+        cmp ax, 0
+        je unknown_command
+        mov word [Q], ax 
+        ret
+
     insert_data_to_one_fd_sector:
         mov al, 1
         mov dh, [head]
@@ -536,6 +762,7 @@ execute_command:
         cmp byte [valid], "F"
         je break
         ret
+
 
 convert_ascii_hex_to_numerical_hex:
     ; parameters: si - start of hex string
@@ -650,9 +877,6 @@ write:
         cmp al, 0x0D ; check if enter is pressed
         je enter ; if the enter is pressed
 
-        cmp al, ' '
-        je space
-
         cmp bx, 256 ; check if 256 chars are written
         je loop ; if true allow only backspace and enter
 
@@ -662,14 +886,6 @@ write:
         stosb ; store char into the buffer, and increment DI (destination index)
         inc bx ; the counter of chars
         jmp loop ; back from the start
-
-    space:
-        mov ah, 05h
-        mov al, byte [current_video_page]
-        inc al
-        mov byte [current_video_page], al
-        int 10h
-        jmp loop
 
     enter:
         cmp bx, 0
@@ -802,6 +1018,7 @@ head db 0, 0
 track db 0, 0
 sector db 0, 0
 N dw 0, 0
+Q dw 0, 0
 prompt db '>', 0
 errorCodeLabel db "Error code: ", 0
 errorCode db 0, 0, "H", 0
@@ -812,6 +1029,7 @@ textLabel db "Text:", 0
 sectorLabel db "Sector:", 0
 A1Label db "A1:", 0
 A2Label db "A2:", 0
+QLabel db "Q:", 0
 NLabel db "N:", 0
 current_video_page db 0
 text_start_index dw 0
@@ -819,6 +1037,9 @@ si_saver dw 0
 temp dw 0
 address1 dw 0
 address2 dw 0
+address1_init dw 0
+address2_init dw 0
+Q_init dw 0
 buffer dw 7c00h+200h+200h+200h+200h+200h
 
-times (2048 - ($ - $$)) db 0x00
+times (2560 - ($ - $$)) db 0x00
