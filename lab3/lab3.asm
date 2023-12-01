@@ -33,7 +33,7 @@ call repeat_string
 ; write frunze's extended signature to the first sector
 mov al, 1
 mov dh, 0
-mov ch, 33 ; 1201//36=66
+mov ch, 33 ; 1201//36=33
 mov cl, 13 ; 1201%36=13 < 18 then dh 0
 xor bx, bx
 mov es, bx
@@ -335,8 +335,8 @@ execute_command:
         ; write every char
         print_from_ram_loop:
             ; avoid nulls
-            cmp byte [es:si], 0
-            je break_point
+            ;cmp byte [es:si], 0
+            ;je break_point
 
             ; get the cursor position
             mov ah, 03h
@@ -576,8 +576,8 @@ execute_command:
                 mov si, word [address2_init]
                 print_from_ram_loop2:
                     ; avoid nulls
-                    cmp byte [es:si], 0
-                    je break_point2
+                    ;cmp byte [es:si], 0
+                    ;je break_point2
 
                     ; get the cursor position
                     mov ah, 03h
