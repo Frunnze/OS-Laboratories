@@ -574,7 +574,7 @@ execute_command:
                 print_from_ram_loop2:
                     ; avoid nulls
                     cmp byte [es:si], 0
-                    je break_point
+                    je break_point2
 
                     ; get the cursor position
                     mov ah, 03h
