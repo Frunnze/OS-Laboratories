@@ -4,7 +4,7 @@ org 7c00h ; begin from this address
 
 ; --- Bootloader manager --- 
 ; TASK 0: Load the extra code to the next 512 bytes of the RAM.
-mov al, 4 ; number of sectors to read
+mov al, 5 ; number of sectors to read
 mov dh, 0 ; head number
 mov ch, 0 ; track
 mov cl, 2 ; sector
@@ -34,14 +34,14 @@ call repeat_string
 mov al, 1
 mov dh, 0
 mov ch, 33 ; 1201//36=66
-mov cl, 13 ; 1201%36=13 > 18 then dh 1
+mov cl, 13 ; 1201%36=13 < 18 then dh 0
 xor bx, bx
 mov es, bx
 mov bx, buffer
 call write_to_floppy
 ; write frunze's extended signature to the last sector
-mov ch, 34 ; 1230//18=68
-mov cl, 6 ; 1230%18=6
+mov ch, 34 ; 1230//36=34
+mov cl, 6 ; 1230%36=6 < 18 then dh 0
 call write_to_floppy
 
 ; clear the used part from the next 512 bytes in RAM
@@ -58,15 +58,16 @@ call repeat_string
 ; write chiper's extended signature to the first sector
 mov al, 1
 mov dh, 0
-mov ch, 60 ; 1081//18=60
-mov cl, 1 ; 1081%18=1
+mov ch, 30 ; 1081//36=30
+mov cl, 1 ; 1081%36=1
 xor bx, bx
 mov es, bx
 mov bx, buffer
 call write_to_floppy
 ; write chiper's extended signature to the last sector
-mov ch, 61 ; 1110//18=61
-mov cl, 12 ; 1110%18=12
+mov ch, 30 ; 1110//36=30
+mov cl, 12 ; 1110%36=30 > 18 then dh 1, cl = 30 - 18 = 12
+mov dh, 1
 call write_to_floppy
 
 ; clear the used part from the next 512 bytes in RAM
@@ -82,19 +83,30 @@ mov bx, 10
 call repeat_string
 ; write manole's extended signature to the first sector
 mov al, 1
-mov dh, 0
-mov ch, 75 ; 1351/18=75
-mov cl, 1 ; 1351%18=1
+mov dh, 1
+mov ch, 37 ; 1351//36=37
+mov cl, 1 ; 1351%36=19 > 18 then dh 1, cl = 19 - 18 = 1
 xor bx, bx
 mov es, bx
 mov bx, buffer
 call write_to_floppy
 ; write manole's extended signature to the last sector
-mov ch, 76 ; 1380//18=76
-mov cl, 12 ; 1380%18=12
+mov dh, 0
+mov ch, 38 ; 1380//36=38
+mov cl, 12 ; 1380%36=12 < 18 then dh 0
 call write_to_floppy
 
 ; Main loop
+mov si, intro
+call print
+mov si, command1
+call print
+mov si, command2
+call print
+mov si, command3
+call print
+mov si, address_rules
+call print
 mov byte [current_video_page], 0
 main_loop:
     ; clear the prompt page (4th page)
@@ -312,15 +324,7 @@ execute_command:
         mov es, bx
 
         ; error code
-        mov cl, ah
-        mov si, errorCodeLabel
-        call print
-
-        mov ah, cl
-        call convert_2hex_to_str
-        mov si, errorCode
-        call print
-        call new_line
+        call display_error
 
         ; print string from ram
         mov si, word [address1]
@@ -330,6 +334,10 @@ execute_command:
 
         ; write every char
         print_from_ram_loop:
+            ; avoid nulls
+            cmp byte [es:si], 0
+            je break_point
+
             ; get the cursor position
             mov ah, 03h
             mov bh, 0
@@ -564,6 +572,10 @@ execute_command:
                 mov es, si
                 mov si, word [address2_init]
                 print_from_ram_loop2:
+                    ; avoid nulls
+                    cmp byte [es:si], 0
+                    je break_point
+
                     ; get the cursor position
                     mov ah, 03h
                     mov bh, 0
@@ -1023,10 +1035,15 @@ prompt db '>', 0
 errorCodeLabel db "Error code: ", 0
 errorCode db 0, 0, "H", 0
 
-headLabel db "Head:", 0
-trackLabel db "Track:", 0
+intro db "Available commands:", 0x0D, 0x0A, 0
+command1 db "w - KEYBOARD ==> FLOPPY", 0x0D, 0x0A, 0
+command2 db "r - FLOPPY ==> RAM", 0x0D, 0x0A, 0
+command3 db "m - RAM ==> FLOPPY", 0x0D, 0x0A, 0
+address_rules db "Free memory: [0x8c00-0x9fc00]", 0x0D, 0x0A, 0x0D, 0x0A, 0
+headLabel db "Head [0-1]:", 0
+trackLabel db "Track [0-79]:", 0
 textLabel db "Text:", 0
-sectorLabel db "Sector:", 0
+sectorLabel db "Sector [1-18]:", 0
 A1Label db "A1:", 0
 A2Label db "A2:", 0
 QLabel db "Q:", 0
@@ -1040,6 +1057,6 @@ address2 dw 0
 address1_init dw 0
 address2_init dw 0
 Q_init dw 0
-buffer dw 7c00h+200h+200h+200h+200h+200h
+buffer dw 7c00h+200h+200h+200h+200h+200h+200h
 
-times (2560 - ($ - $$)) db 0x00
+times (3072 - ($ - $$)) db 0x00
