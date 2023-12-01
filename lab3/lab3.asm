@@ -492,6 +492,7 @@ execute_command:
 
             continue_ram_to_floppy:
             ; go to next page in ram
+            mov bx, word [address2]
             add bx, 0x200
             jnc not_overflow
                 ; if overflow
@@ -519,7 +520,7 @@ execute_command:
                     cmp byte [head], 1
                     jne head_is_zero2
                         ; if [head] == 1 - move to next track
-                        mov bl, byte [track]
+                        mov bl, byte [track]   
                         inc bl
                         mov byte [track], bl
                         mov byte [head], 0
@@ -544,6 +545,8 @@ execute_command:
                     ; copy each byte from [address1:address2] and move it to [di]
                     mov al, [es:bx]
                     mov [di], al
+                    inc di
+                    inc bx
 
                     mov dx, word [Q]
                     dec dx
@@ -644,12 +647,16 @@ execute_command:
                         add_one_to_si2:
                             ; if si != FFFF
                             inc si
-                            jmp print_from_ram_loop2
+                            jmp print_from_ram_loop2 
 
                     finish_printing_from_ram2:
                         mov si, 0
                         mov es, si
                         call new_line
+
+                        mov di, buffer+200h
+                        mov cx, 512
+                        call clear_buffer
         ret
 
     ; --- Functions needed for the execution of the above function ---
