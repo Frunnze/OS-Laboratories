@@ -1,0 +1,14 @@
+read filename && nasm -f bin -o "$filename.bin" "$filename.asm" && python3 resize.py "$filename" && qemu-system-i386 "$filename.bin"
+read filename && nasm -f bin -o "$filename.bin" "$filename.asm" && python3 resize.py "$filename" && qemu-system-i386 -fda "$filename.img"
+pmemsave 0 0xFFFFF dumpram.bin
+
+read filename && 
+nasm -f bin -o "$filename.bin" "$filename.asm" &&
+python3 resize.py "$filename" && 
+nasm -f bin -o program1.bin program1.asm &&
+dd conv=notrunc if=program1.bin of=lab4/lab4.img bs=512 seek=4 &&
+qemu-system-i386 -fda "$filename.img"
+
+1. nasm -f bin bootloader.asm -o bootloader.bin
+2. dd if=/dev/zero of=floppy.img bs=512 count=2880
+3. dd conv=notrunc if=bootloader.bin of=floppy.img bs=512 seek=1
